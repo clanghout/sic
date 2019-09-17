@@ -60,7 +60,7 @@
 //! our PEG parser to accept cli arguments from std::env::args() as well, but as written above, I would
 //! also like to reduce the amount of dependencies (to improve both compile time and binary size).
 //!
-//!
+//! **-- September, 2019*
 //!
 //! [^1]: AOS available from sic 0.5.0 (initial), 0.7.0 (most operations), 0.9.0 (modifiers)
 //!
@@ -69,84 +69,179 @@
 //! [^3]: [commit](https://github.com/foresterre/sic/commit/8066ca67b1cfe30ecfb42180c5beced7af857d4c) which added the current as of writing IOCA implementation which uses Clap to parse the cli image operations and its arguments and then separately creates an image operations parse tree from the Clap provided values and indices (per operation).
 //!
 
-use peekmore::{PeekMore, PeekMoreIterator};
-use std::env;
 use std::fmt::Debug;
 
-pub type IType = i32;
-pub type UType = u32;
-pub type FType = f32;
+use crate::cli_parse::numbers::{F32, I32, U32};
+use crate::cli_parse::parse_to::{ParseFromIter, ParsePerTypeError};
+use peekmore::{PeekMore, PeekMoreIterator};
+
+pub mod numbers;
+pub mod parse_to;
 
 // todo:
 // * write bench
 
 #[derive(Debug)]
+#[cfg_attr(test, derive(Eq, PartialEq))]
+pub enum Core {
+    Operation(Op),
+    // set [operation] [modifier]
+    SetModifier(Op, Modifier),
+    Skip,
+}
+
+// fixme: specialize the errors
+#[derive(Debug)]
+#[cfg_attr(test, derive(Eq, PartialEq))]
+pub enum ParserError {
+    Unexpected,
+
+    // fixme: temporary type for convenience
+    PPTE(ParsePerTypeError),
+}
+
+#[derive(Debug)]
+#[cfg_attr(test, derive(Eq, PartialEq))]
 pub enum Op {
-    Blur,
-    Brighten,
-    Contrast,
-    Crop,
-    Filter3x3,
+    Blur(F32),
+    Brighten(I32),
+    Contrast(F32),
+    Crop((U32, U32, U32, U32)),
+    Filter3x3([F32; 9]),
     FlipH,
     FlipV,
     GrayScale,
-    HueRotate,
+    HueRotate(I32),
     Invert,
-    Resize,
+    Resize((U32, U32)),
     Rotate90,
     Rotate180,
     Rotate270,
-    Unsharpen,
+    Unsharpen((F32, I32)),
 }
 
 impl Op {
-    pub fn from_str(input: &str) -> Option<Self> {
+    const SELECTION: &'static [&'static str] = &[
+        "blur",
+        "brighten",
+        "contrast",
+        "crop",
+        "filter3x3",
+        "flip-horizontal",
+        "flip-vertical",
+        "grayscale",
+        "hue-rotate",
+        "invert",
+        "resize",
+        "rotate90",
+        "rotate180",
+        "rotate180",
+        "rotate270",
+        "unsharpen",
+    ];
+
+    pub fn is_some(input: &str) -> bool {
+        Op::SELECTION.contains(&input)
+    }
+
+    // fixme: re-use sic_parser::value_parser?
+    pub fn from_str<I: Iterator>(
+        iter: &mut PeekMoreIterator<I>,
+        input: &str,
+    ) -> Option<Result<Self, ParserError>>
+    where
+        I::Item: AsRef<str> + std::fmt::Debug,
+    {
         match input {
-            "blur" => Some(Self::Blur),
-            "brighten" => Some(Self::Brighten),
-            "contrast" => Some(Self::Contrast),
-            "crop" => Some(Self::Crop),
-            "filter3x3" => Some(Self::Filter3x3),
-            "fliph" => Some(Self::FlipH),
-            "flipv" => Some(Self::FlipV),
-            "grayscale" => Some(Self::GrayScale),
-            "huerotate" => Some(Self::HueRotate),
-            "invert" => Some(Self::Invert),
-            "resize" => Some(Self::Resize),
-            "rotate90" => Some(Self::Rotate90),
-            "rotate180" => Some(Self::Rotate180),
-            "rotate270" => Some(Self::Rotate270),
-            "unsharpen" => Some(Self::Unsharpen),
+            "blur" => {
+                let result: Result<Self, ParserError> = ParseFromIter::parse(iter)
+                    .map_err(|err| ParserError::PPTE(err))
+                    .map(|arg: F32| Op::Blur(arg));
+
+                Some(result)
+            }
+            "brighten" => {
+                let result: Result<Self, ParserError> = ParseFromIter::parse(iter)
+                    .map_err(|err| ParserError::PPTE(err))
+                    .map(|arg: i32| Op::Brighten(arg));
+
+                Some(result)
+            }
+            "contrast" => {
+                let result: Result<Self, ParserError> = ParseFromIter::parse(iter)
+                    .map_err(|err| ParserError::PPTE(err))
+                    .map(|arg: F32| Op::Contrast(arg));
+
+                Some(result)
+            }
+            "crop" => {
+                let result: Result<Self, ParserError> = ParseFromIter::parse(iter)
+                    .map_err(|err| ParserError::PPTE(err))
+                    .map(|arg: (u32, u32, u32, u32)| Op::Crop(arg));
+
+                Some(result)
+            }
+            "filter3x3" => {
+                let result: Result<Self, ParserError> = ParseFromIter::parse(iter)
+                    .map_err(|err| ParserError::PPTE(err))
+                    .map(|arg: [F32; 9]| Op::Filter3x3(arg));
+
+                Some(result)
+            }
+            "flip-horizontal" => Some(Ok(Op::FlipH)),
+            "flip-vertical" => Some(Ok(Op::FlipV)),
+            "grayscale" => Some(Ok(Op::GrayScale)),
+            "hue-rotate" => {
+                let result: Result<Self, ParserError> = ParseFromIter::parse(iter)
+                    .map_err(|err| ParserError::PPTE(err))
+                    .map(|arg: i32| Op::HueRotate(arg));
+
+                Some(result)
+            }
+            "invert" => Some(Ok(Op::Invert)),
+            "resize" => {
+                let result: Result<Self, ParserError> = ParseFromIter::parse(iter)
+                    .map_err(|err| ParserError::PPTE(err))
+                    .map(|arg: (u32, u32)| Op::Resize(arg));
+
+                Some(result)
+            }
+            "rotate90" => Some(Ok(Op::Rotate90)),
+            "rotate180" => Some(Ok(Op::Rotate180)),
+            "rotate270" => Some(Ok(Op::Rotate270)),
+            "unsharpen" => {
+                let result: Result<Self, ParserError> = ParseFromIter::parse(iter)
+                    .map_err(|err| ParserError::PPTE(err))
+                    .map(|arg: (F32, i32)| Op::Unsharpen(arg));
+
+                Some(result)
+            }
             _ => None,
         }
     }
 }
 
 #[derive(Debug)]
+#[cfg_attr(test, derive(Eq, PartialEq))]
 pub enum Modifier {
     PreserveAspectRatio,
     SamplingFilter,
 }
 
 impl Modifier {
-    pub fn from_str(input: &str) -> Option<Self> {
+    pub fn from_str<I: Iterator>(
+        _iter: &mut PeekMoreIterator<I>,
+        input: &str,
+    ) -> Option<Result<Self, ParserError>>
+    where
+        I::Item: AsRef<str>,
+    {
         match input {
-            "preserve-aspect-ratio" => Some(Self::PreserveAspectRatio),
-            "sampling-filter" => Some(Self::SamplingFilter),
+            "preserve-aspect-ratio" => Some(Ok(Self::PreserveAspectRatio)),
+            "sampling-filter" => Some(Ok(Self::SamplingFilter)),
             _ => None,
         }
     }
-}
-
-#[derive(Debug)]
-pub enum Token {
-    Op(Op),
-    Int(IType),
-    UInt(UType),
-    FP(FType),
-    Skip,
-    // set [operation] [modifier]
-    Set(Op, Modifier),
 }
 
 pub trait StopMark {
@@ -156,77 +251,330 @@ pub trait StopMark {
 impl StopMark for String {
     fn mark() -> Self {
         // End of text
-        format!("{}", 0x03)
+        (0x03 as char).to_string()
     }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum ParsingMode {
+    Arg,
+    Script,
+    Ambiguous,
 }
 
 #[derive(Debug)]
-pub struct Tokenizer<V: StopMark + AsRef<str> + Debug, T: Iterator<Item = V>> {
+pub struct Parser<V: StopMark + AsRef<str> + Debug, T: Iterator<Item = V>> {
     source: PeekMoreIterator<T>,
     stop_mark: V,
+    mode: ParsingMode,
 }
 
-impl<V: StopMark + AsRef<str> + Debug, T: Iterator<Item = V>> Tokenizer<V, T> {
+impl<V: StopMark + AsRef<str> + Debug, T: Iterator<Item = V>> Parser<V, T> {
     pub fn new(input: T) -> Self {
-        Tokenizer {
+        Parser {
             source: input.peekmore(),
             stop_mark: V::mark(),
+            mode: ParsingMode::Ambiguous,
         }
     }
 
-    pub fn prefixed(&mut self) -> bool {
+    pub fn peek_check_for_cli_arg_prefixes(&mut self) -> bool {
         fn starts_with_dashes<V: AsRef<str>>(input: V) -> bool {
-            let dashes = input.as_ref();
-            dbg!(dashes);
-            dashes.starts_with("--")
-            //input.as_ref().starts_with("--")
+            let arg = input.as_ref();
+            arg.starts_with("--") && arg.len() > 2
         }
-
-        let peek_cursor = self.source.needle_position();
-        dbg!(peek_cursor);
 
         let ok = self.source.peek().map(starts_with_dashes);
         ok.unwrap_or(false)
     }
+
+    // if the source we are parsing includes potentially cli args
+    // we ignore the ones we don't know
+    pub fn is_non_image_op_cli_arguments(&self, arg: &str) -> bool {
+        self.mode != ParsingMode::Script
+            && ((arg.starts_with("--") && arg.len() > 2)
+                || (arg.starts_with("-") && arg.len() == 2))
+    }
+
+    pub fn skip_non_image_op_cli_arguments(&self) -> Option<Result<Core, ParserError>> {
+        Some(Ok(Core::Skip))
+    }
 }
 
-impl<V: StopMark + AsRef<str> + Debug, T: Iterator<Item = V>> Iterator for Tokenizer<V, T> {
-    type Item = Token;
+impl<V: StopMark + AsRef<str> + Debug, T: Iterator<Item = V>> Iterator for Parser<V, T> {
+    type Item = Result<Core, ParserError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let prefixed = self.prefixed();
+        let prefixed = self.peek_check_for_cli_arg_prefixes();
         dbg!(prefixed);
 
-        let consume_next = self.source.next();
-        let tokens_next = consume_next.as_ref().unwrap_or(&self.stop_mark);
-        let tokens_as_str = tokens_next.as_ref();
+        let next_consumed = self.source.next();
+        let next_token = next_consumed.as_ref().unwrap_or(&self.stop_mark);
+        // unless parsing mode is Script, if the current token is prefixed,
+        // we limit the slice as to not include the `--`.
+        let next_token = if self.mode != ParsingMode::Script && prefixed {
+            let (_, hi) = next_token.as_ref().split_at(2);
+            hi
+        } else {
+            next_token.as_ref()
+        };
 
-        eprintln!("current: {}", tokens_as_str);
+        eprintln!("token(in): {}", next_token);
 
-        match tokens_as_str {
+        match next_token {
+            // The stop mark tells us that the iterator is finished.
             v if v == self.stop_mark.as_ref() => None,
-            v if v == "1" => Some(Token::Int(1)),
-            _ => Some(Token::Skip),
+
+            // One of the image operations.
+            op if Op::is_some(op) => {
+                let which = Op::from_str(&mut self.source, op);
+                which.map(|v| v.map(|ok| Core::Operation(ok)))
+            }
+
+            // An operation from the cli which is not an image operation.
+            // FIXME: we'll also have to skip the arguments of said potential non image operation
+            //      argument.
+            //      - peek until next peek starts with '--' again; <= skip
+            arg if self.is_non_image_op_cli_arguments(arg) => {
+                self.skip_non_image_op_cli_arguments()
+            }
+            _ => Some(Err(ParserError::Unexpected)),
         }
     }
 }
 
-pub fn prototype() {
-    for arg in env::args() {
-        eprintln!("{:?}", arg);
+// fixme: extend test suite
+// fixme: args.into_iter() -> args whitespace separated; not characters; but this might as well be enough for us here
+pub fn prototype<T: Iterator<Item = String>>(args: T) -> Result<Vec<Core>, ParserError> {
+    let parser = Parser::new(args);
+
+    parser
+        .inspect(|out| println!("token(out): {:?}", out))
+        .collect::<Result<Vec<_>, ParserError>>()
+}
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+mod tests_parser {
+    use super::*;
+
+    macro_rules! combi_test {
+        ($mod_name:ident, $expected:expr, $($input:expr),*) => {
+
+            mod $mod_name {
+                use super::*;
+
+                make_test!{ without, {
+                    without_dashes_body!($expected, $($input),*)
+                }}
+
+                make_test!{ with, {
+                    with_dashes_body!($expected, $($input),*)
+                }}
+           }
+        };
     }
 
-    eprintln!("               ");
-    eprintln!("===============");
-    eprintln!("               ");
+    macro_rules! without_dashes_body {
+        ($expected: expr, $($input:expr),*) => {{
+            let input = vec![$($input.to_string()),*];
 
-    // whitespace separated args
-    let args = env::args();
-
-    // fixme: args.into_iter() -> args whitespace separated; not characters; but this might as well be enough for us here
-    let tokenizer = Tokenizer::new(args.into_iter());
-
-    for (i, token) in tokenizer.enumerate() {
-        eprintln!("#{}, token: {:?}\n\n", i, token);
+            assert_eq!(
+                prototype(input.into_iter()),
+                $expected
+            );
+        }};
     }
+
+    macro_rules! with_dashes_body {
+        ($expected: expr, $($input:expr),*) => {{
+            let mut input = vec![$($input.to_string()),*];
+
+            let mut new = input[0].chars().rev().collect::<String>();
+            input[0] = {
+                new.push_str("-");
+                new.push_str("-");
+                new.chars().rev().collect::<String>()
+            };
+
+            assert_eq!(
+                prototype(input.into_iter()),
+                $expected
+            );
+        }};
+    }
+
+    macro_rules! make_test {
+        ($name:ident, $body:block) => {
+            #[test]
+            fn $name() {
+                $body
+            }
+        };
+    }
+
+    mod blur {
+        use super::*;
+
+        combi_test!(
+            blur_pos15,
+            Ok(vec![Core::Operation(Op::Blur(F32(1.5)))]),
+            "blur",
+            "1.5"
+        );
+        combi_test!(
+            blur2,
+            Err(ParserError::PPTE(ParsePerTypeError::ParseFloatError)),
+            "blur",
+            "xyz"
+        );
+
+        combi_test!(
+            blur_pos1,
+            Ok(vec![Core::Operation(Op::Blur(F32(1.0)))]),
+            "blur",
+            "1"
+        );
+
+        combi_test!(
+            blur_neg1,
+            Ok(vec![Core::Operation(Op::Blur(F32(-1.0)))]),
+            "blur",
+            "-1"
+        );
+    }
+
+    mod brighten {
+        use super::*;
+
+        combi_test!(
+            brighten,
+            Ok(vec![Core::Operation(Op::Brighten(1))]),
+            "brighten",
+            "1"
+        );
+
+        combi_test!(
+            brighten_neg,
+            Ok(vec![Core::Operation(Op::Brighten(-1))]),
+            "brighten",
+            "-1"
+        );
+
+        combi_test!(
+            brighten_not_fp,
+            Err(ParserError::PPTE(ParsePerTypeError::ParseIntError)),
+            "brighten",
+            "-1.5"
+        );
+    }
+
+    mod contrast {
+        use super::*;
+
+        combi_test!(
+            constrast,
+            Ok(vec![Core::Operation(Op::Contrast(F32(1.0)))]),
+            "contrast",
+            "1"
+        );
+
+        combi_test!(
+            contrast_neg,
+            Ok(vec![Core::Operation(Op::Contrast(F32(-1.0)))]),
+            "contrast",
+            "-1"
+        );
+
+        combi_test!(
+            contrast_fp,
+            Ok(vec![Core::Operation(Op::Contrast(F32(-1.0)))]),
+            "contrast",
+            "-1.0"
+        );
+
+        combi_test!(
+            brighten_not_fp,
+            Err(ParserError::PPTE(ParsePerTypeError::ParseFloatError)),
+            "contrast",
+            "x"
+        );
+    }
+
+    mod crop {
+        use super::*;
+
+        combi_test!(
+            crop_basic,
+            Ok(vec![Core::Operation(Op::Crop((1, 2, 3, 4)))]),
+            "crop",
+            "1",
+            "2",
+            "3",
+            "4"
+        );
+
+        combi_test!(
+            crop_zeros,
+            Ok(vec![Core::Operation(Op::Crop((0, 0, 0, 0)))]),
+            "crop",
+            "0",
+            "0",
+            "0",
+            "0"
+        );
+
+        combi_test!(
+            crop_accept_any_fitting_uint,
+            Ok(vec![Core::Operation(Op::Crop((1, 1, 1, 1)))]),
+            "crop",
+            "1",
+            "1",
+            "1",
+            "1"
+        );
+
+        combi_test!(
+            crop_cant_be_neg,
+            Err(ParserError::PPTE(ParsePerTypeError::ParseUIntError)),
+            "crop",
+            "1",
+            "1",
+            "1",
+            "-1"
+        );
+
+        combi_test!(
+            crop_cant_be_not_a_number,
+            Err(ParserError::PPTE(ParsePerTypeError::ParseUIntError)),
+            "crop",
+            "1",
+            "1",
+            "1",
+            "~"
+        );
+    }
+
+    mod multi {
+        use super::*;
+
+        combi_test!(
+            multi_1,
+            Ok(vec![
+                Core::Operation(Op::Blur(F32(1.0))),
+                Core::Operation(Op::Brighten(-2)),
+                Core::Operation(Op::Contrast(F32(3.0))),
+            ]),
+            "blur",
+            "1",
+            "brighten",
+            "-2",
+            "contrast",
+            "3"
+        );
+
+    }
+
 }

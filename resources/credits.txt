@@ -1,6 +1,21 @@
-The `bwlines.png` was generated using image crate for this project.
-The `rainbow_8x6`, 'blackwhite_2x2.bmp', 'palette_4x4.png' images were created for this project.
+bwlines.png 
+	- by: sic project authors
+	- license: sic project license
+rainbow_8x6.bmp
+	- by: sic project authors
+	- license: sic project license
+blackwhite_2x2.bmp
+	- by: sic project authors
+	- license: sic project license
+palette_4x4.png
+	- by: sic project authors
+	- license: sic project license
 
+unsplash_763569_cropped.jpg
+	- by: Eberhard Grossgasteiger on Unsplash
+	- license: Unsplash license (https://unsplash.com/license) 
+	- modifications: cropped by sic project authors
 
-The `unsplash_763569_cropped.jpg` image is a photo by Eberhard Grossgasteiger, distributed on Unsplash
-under the Unsplash license (https://unsplash.com/license) and was cropped for this project.
+test-parser/examples.jpg
+	- by: Drew Dau on Unsplash
+	- license: Unsplash license (https://unsplash.com/license)
